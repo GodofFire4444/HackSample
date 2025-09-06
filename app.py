@@ -39,10 +39,14 @@ def chat():
     history.append({"role": "user", "text": user_text, "task": task, "lang": lang})
 
     # Compose prompt for Gemini
-    prompt = f"Task: {task}\nLanguage: {lang}\nUser: {user_text}\n"
+    prompt = f"Task: {task}\nLanguage: {lang}\nUser: {user_text}"
     try:
         response = model.generate_content(prompt)
-        ai_reply = response.text
+        ai_reply = getattr(response, "text", None)
+        if not ai_reply and hasattr(response, "candidates"):
+            ai_reply = response.candidates[0].content.parts[0].text
+        if not ai_reply:
+            ai_reply = "Sorry, Gemini AI did not return a response."
     except Exception as e:
         ai_reply = "Sorry, I couldn't get an answer from Gemini AI."
 
