@@ -76,5 +76,10 @@ def handle_agent_request():
         print(f"An error occurred during Gemini API call: {e}")
         return jsonify({"reply": f"An error occurred while contacting the AI: {e}"}), 500
 
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))  # Render provides PORT
+    app.run(host="0.0.0.0", port=port)
+
 # Note: We remove the app.run() block for production.
 # The Gunicorn server will run the app.
