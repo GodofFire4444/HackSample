@@ -1,85 +1,55 @@
-import os
+from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
+from flask_session import Session
 import google.generativeai as genai
-from flask import Flask, request, jsonify, render_template # Import render_template
-from dotenv import load_dotenv
+import os
 
-# --- INITIALIZATION ---
-load_dotenv()
-app = Flask(__name__, template_folder='templates') # Tell Flask where to find templates
+app = Flask(__name__)
+app.secret_key = "your_secret_key"
+app.config["SESSION_TYPE"] = "filesystem"
+Session(app)
+CORS(app)
 
-# --- GEMINI AI CONFIGURATION ---
-try:
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables.")
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
-except Exception as e:
-    print(f"--- FATAL ERROR: Failed to configure Gemini AI. ---")
-    print(f"Error details: {e}")
-    model = None
+# Set your Gemini API key here
+GENAI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
+genai.configure(api_key=GENAI_API_KEY)
+model = genai.GenerativeModel("gemini-pro")
 
-# --- PROMPT ENGINEERING ---
-PROMPT_TEMPLATES = {
-    "summary": """
-        You are an expert analyst. Your primary task is to generate a concise and accurate summary...
-    """,
-    "quick-quiz": """
-        You are a helpful quiz generator...
-    """,
-    "flash-card": """
-        You are a flashcard creator...
-    """,
-    "translate": """
-        You are a language translator...
-    """
-} # (Prompts are truncated for brevity, use your full prompts)
+def get_history():
+    if "history" not in session:
+        session["history"] = []
+    return session["history"]
 
-
-# --- NEW ROUTE TO SERVE THE FRONTEND ---
 @app.route("/")
 def index():
-    """Serves the main index.html file."""
-    return render_template('index.html')
+    return render_template("index.html")
 
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
+    user_text = data.get("text", "").strip()
+    task = data.get("task")
+    lang = data.get("lang")
 
-# --- API ENDPOINT ---
-@app.route("/api/agent", methods=["POST"])
-def handle_agent_request():
-    if not model:
-        return jsonify({"reply": "Error: The AI model is not configured on the server."}), 500
+    if not task or not lang or not user_text:
+        return jsonify({"error": "Missing required fields."}), 400
 
-    task = request.form.get("task")
-    message = request.form.get("message")
-    language = request.form.get("language")
-    files = request.files.getlist("files[]")
+    # Save user message
+    history = get_history()
+    history.append({"role": "user", "text": user_text, "task": task, "lang": lang})
 
-    if not task:
-        return jsonify({"reply": "Error: 'task' is a required field."}), 400
-    if task not in PROMPT_TEMPLATES:
-        return jsonify({"reply": f"Error: Task '{task}' is not a valid task."}), 400
-
-    prompt_template = PROMPT_TEMPLATES[task]
-    formatted_prompt = prompt_template.format(message=message, language=language)
-    
-    api_parts = [formatted_prompt]
-    for file in files:
-        api_parts.append({
-            "mime_type": file.mimetype,
-            "data": file.read()
-        })
-        
+    # Compose prompt for Gemini
+    prompt = f"Task: {task}\nLanguage: {lang}\nUser: {user_text}\n"
     try:
-        response = model.generate_content(api_parts)
-        return jsonify({"reply": response.text})
+        response = model.generate_content(prompt)
+        ai_reply = response.text
     except Exception as e:
-        print(f"An error occurred during Gemini API call: {e}")
-        return jsonify({"reply": f"An error occurred while contacting the AI: {e}"}), 500
+        ai_reply = "Sorry, I couldn't get an answer from Gemini AI."
 
+    history.append({"role": "ai", "text": ai_reply})
+    session["history"] = history[-20:]
+
+    return jsonify({"reply": ai_reply, "history": session["history"]})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render provides PORT
-    app.run(host="0.0.0.0", port=port)
-
-# Note: We remove the app.run() block for production.
-# The Gunicorn server will run the app.
+    app.run(debug=True)
